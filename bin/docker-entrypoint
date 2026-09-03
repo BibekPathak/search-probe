@@ -1,10 +1,15 @@
 #!/bin/sh
-# Development entrypoint: make sure dependencies are installed, then run CMD.
-# `bundle install` is fast when the bundle volume already has gems baked in.
+# Development entrypoint: make sure dependencies are installed, provision the
+# dev database (indexes + seed API keys), then run CMD.
 set -e
 
 cd "$(dirname "$0")/.."
 
 bundle check >/dev/null 2>&1 || bundle install
+
+if [ "$RAILS_ENV" = "development" ]; then
+  bin/rails db:mongoid:create_indexes 2>/dev/null || true
+  bin/rails db:seed 2>/dev/null || true
+fi
 
 exec "$@"

@@ -4,6 +4,9 @@ Rails.application.configure do
   # Memory-backed cache so request specs can exercise cache-hit semantics.
   config.cache_store = :memory_store, { size: 8.megabytes }
 
+  # Queued jobs run inline in tests via perform_enqueued_jobs.
+  config.active_job.queue_adapter = :test
+
   config.action_controller.perform_caching = false
 
   config.eager_load = ENV["CI"].present?
