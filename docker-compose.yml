@@ -1,0 +1,68 @@
+name: searchprobe
+
+services:
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--bind_ip_all", "--quiet"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ ping: 1 }).ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: searchprobe-backend
+    entrypoint: ["/app/bin/docker-entrypoint"]
+    command: ["bin/rails", "server", "-b", "0.0.0.0", "-p", "3000"]
+    environment:
+      RAILS_ENV: development
+      MONGODB_URI: mongodb://mongo:27017/searchprobe_development
+      SIMULATOR_BASE_URL: http://backend:3000
+      BROWSER_WORKER_URL: http://worker:8001
+      CACHE_TTL: "300"
+      RATE_LIMIT_PER_MINUTE: "100"
+      LOG_JSON: "true"
+    volumes:
+      - .:/app
+      - bundle_data:/usr/local/bundle
+    ports:
+      - "3000:3000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    image: searchprobe-worker
+    environment:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      BROWSER_HEADLESS: "true"
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  mongo_data:
+  bundle_data:

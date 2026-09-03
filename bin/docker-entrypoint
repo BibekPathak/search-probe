@@ -1,0 +1,10 @@
+#!/bin/sh
+# Development entrypoint: make sure dependencies are installed, then run CMD.
+# `bundle install` is fast when the bundle volume already has gems baked in.
+set -e
+
+cd "$(dirname "$0")/.."
+
+bundle check >/dev/null 2>&1 || bundle install
+
+exec "$@"

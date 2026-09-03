@@ -1,0 +1,10 @@
+#!/usr/bin/env ruby
+# Runs the app's provisioning scripts from within Docker.
+require "fileutils"
+
+APP_ROOT = File.expand_path("..", __dir__)
+Dir.chdir APP_ROOT do
+  system "bundle install" || raise("bundle install failed")
+
+  system "bin/rails db:seed" || raise("db:seed failed")
+end

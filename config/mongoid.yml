@@ -1,0 +1,40 @@
+# Mongoid configuration.
+# MONGODB_URI drives everything (single host string).
+# Example: mongodb://mongo:27017/searchprobe_development
+
+defaults: &defaults
+  clients:
+    default:
+      uri: "<%= ENV.fetch('MONGODB_URI', 'mongodb://mongo:27017/searchprobe_development') %>"
+      options:
+        server_selection_timeout: 5
+        connect_timeout: 5
+  options:
+    use_utc: true
+    include_root_in_json: false
+    belongs_to_required_by_default: false
+    raise_not_found_error: true
+
+development:
+  <<: *defaults
+
+test:
+  <<: *defaults
+  clients:
+    default:
+      uri: "<%= ENV.fetch('MONGODB_TEST_URI', 'mongodb://mongo:27017/searchprobe_test') %>"
+      options:
+        server_selection_timeout: 5
+  options:
+    use_utc: true
+    include_root_in_json: false
+    belongs_to_required_by_default: false
+    raise_not_found_error: false
+
+production:
+  <<: *defaults
+  clients:
+    default:
+      uri: "<%= ENV.fetch('MONGODB_URI') %>"
+      options:
+        server_selection_timeout: 10

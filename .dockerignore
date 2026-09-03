@@ -1,0 +1,12 @@
+# Gemfile.lock is intentionally committed for reproducible deploys.
+Dockerfile
+.dockerignore
+.git
+.gitignore
+log/*
+tmp/*
+spec/
+coverage/
+.idea/
+.vscode/
+.env

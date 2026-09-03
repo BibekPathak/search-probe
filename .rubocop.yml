@@ -1,0 +1,15 @@
+inherit_gem:
+  rubocop-rails-omakase: rubocop.yml
+
+AllCops:
+  NewCops: enable
+  TargetRubyVersion: 3.3
+  Exclude:
+    - "bin/**/*"
+    - "db/**/*"
+    - "tmp/**/*"
+    - "log/**/*"
+    - "vendor/**/*"
+    - "worker/**/*"
+    - "spec/spec_helper.rb"
+    - "config/initializers/json_logger.rb"

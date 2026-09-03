@@ -1,0 +1,10 @@
+#!/bin/sh
+# Run the RSpec suite inside the backend container against the test database.
+# Requires the compose stack (or at least the mongo service) to be up:
+#   docker compose up -d mongo
+set -e
+
+exec docker compose run --rm -T \
+  -e RAILS_ENV=test \
+  -e MONGODB_URI=mongodb://mongo:27017/searchprobe_test \
+  backend bundle exec rspec "$@"

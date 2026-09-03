@@ -1,0 +1,38 @@
+# --- Ruby / Rails ---
+*.gem
+*.rbc
+/.bundle
+/config/database.yml
+/config/master.key
+/config/credentials/*.key
+/config/credentials/*.enc
+log/*
+tmp/*
+storage/*
+!log/.keep
+!tmp/.keep
+!/config/credentials
+/db/*.sqlite3
+/db/*.sqlite3-*
+
+# --- Test tooling ---
+/coverage/
+/spec/examples.txt
+
+# --- Runtime / env ---
+.env
+.env.*
+*.pem
+docker-compose.override.yml
+
+# --- Worker (Python / Playwright) ---
+worker/.venv/
+__pycache__/
+*.py[cod]
+.ms-playwright/
+
+# --- OS / editors ---
+.DS_Store
+*.swp
+.idea/
+.vscode/
