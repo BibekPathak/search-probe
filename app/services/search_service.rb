@@ -1,21 +1,18 @@
-# Orchestrates a single synchronous search.
+# Orchestrates a single synchronous search through the ExtractionPlanner.
 #
-# Current shape (Phase 2): one HTTP attempt, persisted + logged via the attempt
-# recorder, with normalized results. Later phases slot the ExtractionPlanner,
-# cache lookups and background jobs in behind this same facade so the
-# controllers stay untouched.
+# The service owns lifecycle + persistence; the planner owns the extraction
+# policy and records every attempt. Controllers stay untouched by either.
 class SearchService
   Outcome = Struct.new(:query, :engine, :results, :cached, :latency_ms,
                        :strategy, :attempts, :search, keyword_init: true)
 
   DEFAULT_ENGINE = "google"
 
-  def initialize(extractor: nil, recorder: nil)
-    @extractor = extractor || HttpExtractor.new
-    @recorder = recorder || ExtractionAttemptRecorder.new
+  def initialize(planner: nil)
+    @planner = planner || ExtractionPlanner.default
   end
 
-  def call(query:, engine: nil, request_id: nil)
+  def call(query:, engine: nil, request_id: nil, context: {})
     normalized_query = query.to_s.strip
     normalized_engine = engine.to_s.strip.presence || DEFAULT_ENGINE
 
@@ -24,9 +21,15 @@ class SearchService
 
     search = Search.create!(query: normalized_query, engine: normalized_engine, status: "running")
 
-    extraction = @extractor.extract(query: normalized_query, engine: normalized_engine)
-    @recorder.call(search: search, engine: normalized_engine, extraction: extraction, request_id: request_id)
+    outcome = @planner.call(
+      query: normalized_query,
+      engine: normalized_engine,
+      search: search,
+      request_id: request_id,
+      context: context
+    )
 
+    extraction = outcome.extraction
     unless extraction.success?
       search.update!(status: "failed", error_type: extraction.error_type)
       raise Errors::ExtractionFailed.new(
@@ -47,7 +50,7 @@ class SearchService
       cached: false,
       latency_ms: latency,
       strategy: extraction.strategy,
-      attempts: search.extraction_attempts.count,
+      attempts: outcome.attempts.length,
       search: search
     )
   rescue Errors::Error

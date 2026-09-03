@@ -14,7 +14,7 @@ class HttpExtractor < Extractor
   #   5xx            -> transient, server-side (retryable)
   def extract(query:, engine:, context: {})
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    url = build_url(query: query, engine: engine)
+    url = build_url(query: query, engine: engine, simulate: context[:simulate])
 
     response = HttpFetcher.new.get(url, timeout_seconds: timeout_seconds)
     latency = elapsed_ms(started)
@@ -52,10 +52,12 @@ class HttpExtractor < Extractor
 
   private
 
-  def build_url(query:, engine:)
+  def build_url(query:, engine:, simulate: nil)
     base = Rails.application.config.x.simulator_base_url
     count = Simulator::SerpBuilder::DEFAULT_COUNT
-    "#{base}/simulator/#{engine}?q=#{CGI.escape(query)}&count=#{count}"
+    url = +"#{base}/simulator/#{engine}?q=#{CGI.escape(query)}&count=#{count}"
+    url << "&failure=#{CGI.escape(simulate)}" if simulate.present?
+    url
   end
 
   def interpret(response, latency:)

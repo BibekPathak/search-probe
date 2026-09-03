@@ -14,7 +14,7 @@ tiny and stable:
       "success": true,
       "results": [{"position":1,"title":"...","url":"...","snippet":"...","result_type":"organic"}],
       "latency_ms": 812,
-      "metadata": {...}
+      "metadata": {"http_status": 200}
     }
 
 On failure the worker returns a structured error the planner understands,
@@ -26,7 +26,9 @@ from __future__ import annotations
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="SearchProbe Browser Worker", version="0.1.0")
+from extractor import run_extraction
+
+app = FastAPI(title="SearchProbe Browser Worker", version="0.2.0")
 
 
 class ExtractRequest(BaseModel):
@@ -42,8 +44,4 @@ def health() -> dict:
 
 @app.post("/extract")
 def extract(payload: ExtractRequest) -> dict:
-    # Full Playwright implementation is added in the browser-extractor phase.
-    return {
-        "success": False,
-        "error": {"type": "unknown", "message": "browser extractor not yet initialized"},
-    }
+    return run_extraction(url=payload.url, query=payload.query, engine=payload.engine)

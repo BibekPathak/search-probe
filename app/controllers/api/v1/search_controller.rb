@@ -7,7 +7,8 @@ module Api
         outcome = SearchService.new.call(
           query: params[:q],
           engine: params[:engine],
-          request_id: request.request_id
+          request_id: request.request_id,
+          context: { simulate: params[:simulate] }
         )
 
         render json: {

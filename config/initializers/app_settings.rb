@@ -13,6 +13,7 @@ Rails.application.configure do
 
   # Playwright extraction worker.
   config.x.browser_worker_url = ENV.fetch("BROWSER_WORKER_URL", "http://localhost:8001")
+  config.x.browser_worker_timeout_seconds = ENV.fetch("BROWSER_WORKER_TIMEOUT_SECONDS", "20").to_i
 
   # Cache TTL (seconds) for identical query+engine responses.
   config.x.cache_ttl = ENV.fetch("CACHE_TTL", "300").to_i
