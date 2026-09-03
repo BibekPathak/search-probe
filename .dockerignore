@@ -3,10 +3,14 @@ Dockerfile
 .dockerignore
 .git
 .gitignore
+.github
 log/*
 tmp/*
 spec/
+worker/
 coverage/
 .idea/
 .vscode/
 .env
+README.md
+LICENSE

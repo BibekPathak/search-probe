@@ -1,10 +1,15 @@
 #!/usr/bin/env ruby
-# Runs the app's provisioning scripts from within Docker.
+# Provision the application from a clean clone: install gems, create Mongo
+# indexes and seed the development API keys. Run from the repo root:
+#   bin/setup
 require "fileutils"
 
 APP_ROOT = File.expand_path("..", __dir__)
 Dir.chdir APP_ROOT do
   system "bundle install" || raise("bundle install failed")
 
+  abort("RAILS_ENV must not be production for bin/setup.") if ENV["RAILS_ENV"] == "production"
+
+  system "bin/rails db:mongoid:create_indexes" || raise("index creation failed")
   system "bin/rails db:seed" || raise("db:seed failed")
 end
