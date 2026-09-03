@@ -49,6 +49,14 @@ and returns normalized, deduplicated, typed results:
 Extraction complexity is hidden behind a stable, normalized contract: the
 client only cares about **query → normalized results**.
 
+SearchProbe is **simulator-first**: it runs against a deterministic local
+search-engine simulator so the entire failure matrix is reproducible and
+testable offline. Because extraction goes through a small **provider
+registry**, real engines can be switched on behind the exact same interface —
+the API, planner, and models never change. Two live **Bing** providers ship
+today (opt-in via `LIVE_ENGINES`), and adding any other engine is one new
+provider class.
+
 ## 2. Why I built it
 
 Search extraction looks deceptively simple until you actually try it:
@@ -98,6 +106,7 @@ Layers:
 ## 4. Features
 
 - **Normalized REST API** — `GET /api/v1/search` (sync) and `POST/GET /api/v1/searches` (async, ActiveJob)
+- **Provider registry** — each engine resolves to a `Provider` (simulator by default; **live Bing RSS + Bing HTML** adapters when enabled via `LIVE_ENGINES`). Real providers plug in without touching the API or planner
 - **Two extraction strategies** behind one interface — cheap HTTP first, headless-browser fallback
 - **Adaptive planner** — picks strategies from historical success rate and latency; retries transient failures with backoff; escalates blocks/CAPTCHAs/parse walls to the browser; never bypasses a real CAPTCHA
 - **Deterministic search-engine simulator** — injectable `403 / 429 / 500 / timeout / captcha / malformed` modes
@@ -106,7 +115,7 @@ Layers:
 - **API keys & rate limiting** — BCrypt-hashed keys, per-key 100 req/min with `Retry-After`
 - **Metrics endpoint + dashboard** — totals, success/cache-hit rates, per-strategy stats, failure breakdown, recent attempts
 - **SERP diffing** — compare the latest result set to the previous one for the same `query+engine`
-- **Tested** — 140 RSpec examples, RuboCop clean, Dockerized CI
+- **Tested** — 157 RSpec examples, RuboCop clean, Dockerized CI
 
 ## 5. Request flow (synchronous)
 
@@ -136,6 +145,12 @@ extract(query:, engine:, context:) → ExtractionResult
 #                                  parse_error/network_error/unknown
 ```
 
+Where the request goes is a **provider** decision (`EngineRegistry` →
+`Providers::SimulatorProvider | BingHtmlProvider | BingRssProvider`), not an
+extractor concern. Extractors stay engine-agnostic: they ask the provider for
+the endpoint, fetch it, and normalize whatever the provider parsed. Switching
+Bing to live extraction is a config change, not a code change:
+
 The planner keeps historical statistics per `engine + strategy`:
 
 ```
@@ -156,6 +171,29 @@ Google / Browser  success_rate: 0.99   avg_latency_ms: 2180  score = 0.00045
 | extractor raises unexpectedly | recorded as a structured `unknown` failure |
 
 A hard **`MAX_ATTEMPTS`** (default 3) caps total work per search.
+
+### Live providers
+
+Live extraction is **off by default**; enable it with the environment variable:
+
+```bash
+LIVE_ENGINES=bing docker compose up -d        # Bing via the HTML scrape adapter
+LIVE_ENGINES=bing_rss docker compose up -d    # Bing via the stable RSS feed
+```
+
+- `bing` → `BingHtmlProvider`: parses `li.b_algo` blocks and **unwraps Bing's
+  `bing.com/ck/a` redirect wrapper** back to the real destination URL.
+- `bing_rss` → `BingRssProvider`: parses the public RSS feed (`format=rss`) —
+  the most stable live path.
+- Engines *not* listed stay on the simulator, so tests/CI and the default demo
+  never depend on the network.
+- Live engines honor the same failure taxonomy: a real block/rate-limit/challenge
+  surfaces as a structured error (or escalates to the browser) — nothing is
+  bypassed.
+- Both adapters are verified against committed real Bing fixtures, and the
+  demo-only `simulate*` params are **never** forwarded to a live engine.
+- Google/DuckDuckGo remain simulator-only for now (heavily bot-walled and
+  ToS-fragile); adding one later is a new provider class plus a registry line.
 
 ## 7. Data model
 
@@ -321,7 +359,9 @@ docker compose run --rm backend bundle exec rubocop   # lint
 ```
 
 The test database is isolated (`searchprobe_test`) and truncated between
-examples. All outbound HTTP (simulator + worker) is WebMock-stubbed.
+examples. All outbound HTTP (simulator + worker) is WebMock-stubbed; the live
+Bing providers are covered by committed real-response fixtures, so the suite
+never touches the network either.
 
 ## 15. Docker
 
@@ -343,6 +383,7 @@ Environment variables (all optional unless noted):
 | `CACHE_TTL` | `300` | cache TTL in seconds |
 | `MAX_ATTEMPTS` | `3` | planner attempt budget |
 | `REQUEST_TIMEOUT_SECONDS` | `5` | HTTP extractor timeout |
+| `LIVE_ENGINES` | *(empty)* | engines extracted live instead of via the simulator, e.g. `bing` or `bing,bing_rss` |
 | `RATE_LIMIT_PER_MINUTE` | `100` | per-key API rate limit |
 | `LOG_JSON` | `true` | structured JSON logs to stdout |
 | `DASHBOARD_API_KEY` | `dev-key` | key the dashboard JS uses |
@@ -383,7 +424,11 @@ lead strategy accordingly — while still staying simple (a score, not ML).
 ### Why a simulator?
 Reliable tests and demos must not depend on external search engines whose
 HTML, availability, or anti-bot behaviour can change at any moment. The
-simulator reproduces every condition deterministically.
+simulator reproduces every condition deterministically. Because extraction is
+provider-based, the simulator and live engines coexist: it is the default, and
+the same interface that makes tests reproducible makes real engines plug in
+(the failure matrix is exercised against the simulator; live providers reuse
+every retry/fallback path).
 
 ### Other deliberate choices
 - **Memory cache + ActiveJob async adapter** — zero extra infra for a single
@@ -397,9 +442,10 @@ simulator reproduces every condition deterministically.
 
 ## 17. What I would build next
 
-1. **Real engine adapters** behind the same `Extractor` interface
-   (Google/Bing/DuckDuckGo), enabled per engine via feature flags, with the
-   simulator retained for tests/CI.
+1. **More real engines** — Google/DuckDuckGo adapters behind the same provider
+   seam (they are bot-walled in datacenter IPs, so they'd be fixture-verified
+   and documented as network-dependent), plus a Bing browser fallback smoke
+   path for live engines.
 2. **Generic proxy layer** — a `ProxyPool` interface with rotate/ban/health
    semantics, configured for local/test only.
 3. **Redis-based cache + rate limiter + Sidekiq** for multi-node deployments,
@@ -416,24 +462,34 @@ simulator reproduces every condition deterministically.
 
 ## Two-minute demo
 
+Fastest: a script that runs the whole story and prints results with
+explanations:
+
+```bash
+./script/demo                          # simulator scenarios (HTTP, cache, 429, diff)
+LIVE_ENGINES=bing ./script/demo        # + one live Bing extraction
+```
+
+Or run it by hand:
+
 ```bash
 docker compose up -d
 KEY="X-API-Key: dev-key"
 
-# Scenario 1 — HTTP succeeds
-curl -sH "$KEY" "localhost:3000/api/v1/search?q=rust+web+framework" | python3 -m json.tool   # strategy: http
+# Scenario 1 — HTTP succeeds (planner: http)
+curl -sH "$KEY" "localhost:3000/api/v1/search?q=rust+web+framework" | python3 -m json.tool
 
-# Scenario 2 — simulate a 429; planner escalates to the browser
-curl -sH "$KEY" "localhost:3000/api/v1/search?q=rust+web+framework&simulate=429" | python3 -m json.tool   # strategy: browser
+# Scenario 2 — simulate a 429; HTTP fails, planner escalates to the browser (strategy: browser)
+curl -sH "$KEY" "localhost:3000/api/v1/search?q=rust+web+framework&simulate=429" | python3 -m json.tool
 
-# Scenario 3 — same query again is served from cache
-curl -sH "$KEY" "localhost:3000/api/v1/search?q=rust+web+framework" | python3 -m json.tool   # cached: true
+# Scenario 3 — identical query is now served from cache (cached: true)
+curl -sH "$KEY" "localhost:3000/api/v1/search?q=rust+web+framework" | python3 -m json.tool
 
-# Scenario 4 — flip ordering, then diff the two result sets
+# Scenario 4 — flip ranking, then diff the two result sets (position_changes: [...]):
 curl -sH "$KEY" "localhost:3000/api/v1/search?q=rust+web+framework&simulate_order=reversed" > /dev/null
-ID=$(curl -sH "$KEY" "localhost:3000/api/v1/searches" -H "Content-Type: application/json" \
-       -d '{"query":"rust web framework"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])")
-curl -sH "$KEY" "localhost:3000/api/v1/searches/$ID/diff" | python3 -m json.tool               # position_changes: [...]
+ID=$(curl -sH "$KEY" "localhost:3000/api/v1/attempts?limit=1" | python3 -c \
+     "import sys,json;print(json.load(sys.stdin)['attempts'][0]['search_id'])")
+curl -sH "$KEY" "localhost:3000/api/v1/searches/$ID/diff" | python3 -m json.tool
 
 open http://localhost:3000/dashboard
 ```
@@ -445,17 +501,19 @@ open http://localhost:3000/dashboard
 │   ├── controllers/          # health, simulator, dashboard, api/v1/* (thin)
 │   ├── errors/               # domain errors (Validation, UnsupportedEngine, ExtractionFailed)
 │   ├── extractors/           # Extractor base, HttpExtractor, BrowserExtractor
+│   │   └── providers/        # Provider registry targets (Simulator, BingHtml, BingRss)
 │   ├── helpers/              # dashboard render helpers
 │   ├── jobs/                 # ApplicationJob, SearchJob
 │   ├── models/               # Search, SearchResult, ExtractionAttempt, ApiKey, RateLimitEntry
 │   ├── parsers/              # SerpParser
-│   ├── services/             # SearchService, ExtractionPlanner, EngineStrategyStats,
+│   ├── services/             # SearchService, EngineRegistry, ExtractionPlanner, EngineStrategyStats,
 │   │                         # ResultNormalizer, SearchCache, RateLimiter, MetricsService,
 │   │                         # SerpDiff, ExtractionAttemptRecorder, StructuredLog, ...
 │   └── views/                # dashboard (ERB + vanilla JS)
 ├── worker/                   # Python FastAPI + Playwright extraction worker
 ├── db/seeds.rb               # idempotent dev API-key seed
-├── spec/                     # 140 RSpec examples (requests/services/models/extractors/parsers)
+├── script/                   # test + demo helpers
+├── spec/                     # 157 RSpec examples (requests/services/models/extractors/parsers)
 ├── config/                   # Rails 8 + Mongoid (no ActiveRecord)
 ├── .github/workflows/ci.yml  # lint + tests + Docker build on push/PR
 └── docker-compose.yml        # mongo + backend + worker, one command

@@ -22,6 +22,10 @@ Rails.application.configure do
   config.x.max_attempts = ENV.fetch("MAX_ATTEMPTS", "3").to_i
   config.x.request_timeout_seconds = ENV.fetch("REQUEST_TIMEOUT_SECONDS", "5").to_i
 
+  # Engines that extract live instead of from the simulator, e.g. "bing" or
+  # "bing,bing_rss". Empty by default: everything runs against the simulator.
+  config.x.live_engines = ENV.fetch("LIVE_ENGINES", "").split(",").map(&:strip).reject(&:empty?).freeze
+
   # API rate limiting: requests per minute per API key (or IP for unauthenticated probes).
   config.x.rate_limit_per_minute = ENV.fetch("RATE_LIMIT_PER_MINUTE", "100").to_i
 end

@@ -9,9 +9,13 @@ class BrowserExtractor < Extractor
   STRATEGY = "browser"
 
   def extract(query:, engine:, context: {})
+    provider = EngineRegistry.provider_for(engine)
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    url = build_url(query: query, engine: engine, simulate: context[:simulate],
-                    order: context[:simulate_order])
+
+    # Only the simulator understands the client=browser bypass; real providers
+    # get their plain endpoint (their wall is modelled by the failure taxonomy).
+    browser_context = context.merge(client: "browser")
+    url = provider.endpoint(query: query, context: browser_context)
 
     response = WorkerClient.post(worker_base_url, "/extract",
                                  body: { url: url, query: query, engine: engine },
@@ -74,15 +78,6 @@ class BrowserExtractor < Extractor
     JSON.parse(body)
   rescue JSON::ParserError
     {}
-  end
-
-  def build_url(query:, engine:, simulate: nil, order: nil)
-    base = Rails.application.config.x.simulator_base_url
-    url = +"#{base}/simulator/#{engine}?q=#{CGI.escape(query)}"
-    url << "&client=browser"
-    url << "&failure=#{CGI.escape(simulate)}" if simulate.present?
-    url << "&order=reversed" if order == "reversed"
-    url
   end
 
   def worker_base_url

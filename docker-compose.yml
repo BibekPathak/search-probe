@@ -30,6 +30,7 @@ services:
       CACHE_TTL: "300"
       RATE_LIMIT_PER_MINUTE: "100"
       LOG_JSON: "true"
+      LIVE_ENGINES: "${LIVE_ENGINES:-}"
     volumes:
       - .:/app
       - bundle_data:/usr/local/bundle

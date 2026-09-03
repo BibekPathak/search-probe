@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# SearchProbe two-minute demo.
+#
+# Runs the four README scenarios against a running stack and prints short
+# explanations. Assumes `docker compose up -d` already started everything and
+# the seeded key is dev-key.
+#
+#   ./script/demo                # simulator scenarios
+#   LIVE_ENGINES=bing ./script/demo   # also shows one live Bing extraction
+set -euo pipefail
+
+BASE="${SEARCHPROBE_BASE:-http://localhost:3000}"
+KEY="X-API-Key: ${SEARCHPROBE_KEY:-dev-key}"
+QUERY="${SEARCHPROBE_QUERY:-rust web framework}"
+
+step() { printf "\n\033[1;36m== %s ==\033[0m\n" "$1"; }
+jq()  { python3 -c 'import sys,json;d=json.load(sys.stdin);print(json.dumps(d))'; }
+
+step "0. health"
+curl -fsS "$BASE/health" | jq
+
+step "1. HTTP extraction succeeds"
+curl -fsS -H "$KEY" --get "$BASE/api/v1/search" --data-urlencode "q=$QUERY" \
+  | python3 -c 'import sys,json;d=json.load(sys.stdin);print("strategy:",d["metadata"]["strategy"],"| results:",len(d["results"]),"| attempts:",d["metadata"]["attempts"])'
+
+step "2. simulate HTTP 429 -> planner escalates to the browser"
+curl -fsS -H "$KEY" --get "$BASE/api/v1/search" --data-urlencode "q=$QUERY" --data "simulate=429" \
+  | python3 -c 'import sys,json;d=json.load(sys.stdin);print("strategy:",d["metadata"]["strategy"],"| results:",len(d["results"]),"| attempts:",d["metadata"]["attempts"])'
+
+step "3. identical query -> served from cache"
+curl -fsS -H "$KEY" --get "$BASE/api/v1/search" --data-urlencode "q=$QUERY" \
+  | python3 -c 'import sys,json;d=json.load(sys.stdin);print("cached:",d["metadata"]["cached"],"| strategy:",d["metadata"]["strategy"])'
+
+step "4. flip ordering, then diff the two result sets"
+curl -fsS -H "$KEY" --get "$BASE/api/v1/search" --data-urlencode "q=$QUERY" >/dev/null          # baseline (may hit cache)
+curl -fsS -H "$KEY" --get "$BASE/api/v1/search" --data-urlencode "q=$QUERY" --data "simulate_order=reversed" >/dev/null  # fresh, reversed
+SEARCH_ID=$(curl -fsS -H "$KEY" "$BASE/api/v1/attempts?limit=1" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["attempts"][0]["search_id"])')
+curl -fsS -H "$KEY" "$BASE/api/v1/searches/$SEARCH_ID/diff" \
+  | python3 -c 'import sys,json;d=json.load(sys.stdin);print("position_changes:",len(d["position_changes"]),"| added:",len(d["added"]),"| removed:",len(d["removed"]))'
+
+if [ "${LIVE_ENGINES:-}" != "" ]; then
+  step "5. live engine enabled (LIVE_ENGINES=$LIVE_ENGINES)"
+  ENGINE="${LIVE_ENGINES%%,*}"
+  if [ "$ENGINE" = "bing_rss" ]; then ENGINE="bing"; fi
+  curl -fsS -H "$KEY" --get "$BASE/api/v1/search" --data-urlencode "q=$QUERY" --data "engine=$ENGINE&force_refresh=true" \
+    | python3 -c 'import sys,json;d=json.load(sys.stdin);r=d["results"];print("engine:",d["engine"],"| strategy:",d["metadata"]["strategy"],"| top:",r[0]["url"] if r else "none")'
+fi
+
+printf "\n\033[1;36m== 6. dashboard ==\033[0m\n"
+echo "open $BASE/dashboard"
