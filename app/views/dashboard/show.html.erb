@@ -1,0 +1,127 @@
+<header>
+  <h1>SearchProbe</h1>
+  <span class="sub">adaptive search extraction infrastructure</span>
+  <span class="refresh-note" id="last-refresh">waiting&hellip;</span>
+</header>
+
+<main>
+  <section class="cards">
+    <div class="card">
+      <div class="label">Total searches</div>
+      <div class="value" data-stat="total_searches"><%= @metrics[:total_searches] %></div>
+    </div>
+    <div class="card">
+      <div class="label">Success rate</div>
+      <div class="value" data-stat="success_rate"><%= format_rate(@metrics[:success_rate]) %></div>
+    </div>
+    <div class="card">
+      <div class="label">Average latency</div>
+      <div class="value" data-stat="average_latency_ms"><%= @metrics[:average_latency_ms] %> ms</div>
+    </div>
+    <div class="card">
+      <div class="label">Cache hit rate</div>
+      <div class="value" data-stat="cache_hit_rate"><%= format_rate(@metrics[:cache_hit_rate]) %></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Strategy performance</h2>
+    <table>
+      <thead>
+        <tr><th>Engine / strategy</th><th>Attempts</th><th>Success rate</th><th>Avg latency</th></tr>
+      </thead>
+      <tbody id="strategy-rows">
+        <%= render_strategy_rows(@metrics) %>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>Recent extraction attempts</h2>
+    <table>
+      <thead>
+        <tr><th>Time</th><th>Query</th><th>Engine</th><th>Strategy</th><th>Status</th><th>Latency</th><th>Error</th></tr>
+      </thead>
+      <tbody id="attempt-rows">
+        <%= render_attempt_rows(@attempts) %>
+      </tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+(function () {
+  var apiKey = document.querySelector('meta[name="api-key"]').getAttribute('content');
+
+  function esc(value) {
+    return String(value === null || value === undefined ? "" : value).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function rate(x) { return (x * 100).toFixed(1) + "%"; }
+  function time(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    return d.toLocaleTimeString([], { hour12: false }) + " " + d.toISOString().slice(0, 10);
+  }
+  function strategyPill(s) {
+    return '<span class="pill ' + esc(s) + '">' + esc(s) + "</span>";
+  }
+  function statusPill(s) {
+    return '<span class="pill ' + (s === "success" ? "success" : "failure") + '">' + esc(s) + "</span>";
+  }
+
+  function render(metrics, attempts) {
+    var stats = {
+      total_searches: metrics.total_searches,
+      success_rate: rate(metrics.success_rate),
+      average_latency_ms: metrics.average_latency_ms + " ms",
+      cache_hit_rate: rate(metrics.cache_hit_rate)
+    };
+    Object.keys(stats).forEach(function (key) {
+      var el = document.querySelector('[data-stat="' + key + '"]');
+      if (el) el.textContent = stats[key];
+    });
+
+    var strategyRows = Object.keys(metrics.strategies || {}).map(function (strategy) {
+      var s = metrics.strategies[strategy];
+      return "<tr>" +
+        "<td>" + strategyPill(strategy) + "</td>" +
+        "<td>" + esc(s.attempts) + "</td>" +
+        "<td>" + rate(s.success_rate) + "</td>" +
+        "<td>" + esc(s.average_latency_ms) + " ms</td>" +
+        "</tr>";
+    }).join("");
+    document.getElementById("strategy-rows").innerHTML = strategyRows || '<tr><td colspan="4" class="muted">No extraction attempts yet.</td></tr>';
+
+    var attemptRows = (attempts.attempts || []).map(function (a) {
+      var err = a.error_type ? '<span class="err">' + esc(a.error_type) + "</span>" : '<span class="muted">-</span>';
+      return "<tr>" +
+        "<td>" + esc(time(a.created_at)) + "</td>" +
+        "<td>" + esc(a.query) + "</td>" +
+        "<td>" + esc(a.engine) + "</td>" +
+        "<td>" + strategyPill(a.strategy) + "</td>" +
+        "<td>" + statusPill(a.status) + "</td>" +
+        "<td>" + esc(a.latency_ms) + " ms</td>" +
+        "<td>" + err + "</td>" +
+        "</tr>";
+    }).join("");
+    document.getElementById("attempt-rows").innerHTML = attemptRows || '<tr><td colspan="7" class="muted">No extraction attempts yet.</td></tr>';
+
+    document.getElementById("last-refresh").textContent = "refreshed " + new Date().toLocaleTimeString([], { hour12: false });
+  }
+
+  function refresh() {
+    var headers = { "X-API-Key": apiKey, "Accept": "application/json" };
+    Promise.all([
+      fetch("/api/v1/metrics", { headers: headers }).then(function (r) { return r.ok ? r.json() : null; }),
+      fetch("/api/v1/attempts?limit=15", { headers: headers }).then(function (r) { return r.ok ? r.json() : null; })
+    ]).then(function (results) {
+      if (results[0] && results[1]) render(results[0], results[1]);
+    }).catch(function () { /* transient failure: keep the last good render */ });
+  }
+
+  refresh();
+  setInterval(refresh, 5000);
+})();
+</script>

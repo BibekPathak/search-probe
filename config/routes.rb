@@ -21,6 +21,9 @@ Rails.application.routes.draw do
         end
       end
 
+      # Recent extraction attempts (dashboard feed).
+      get "attempts", to: "attempts#index"
+
       # Aggregated operational metrics.
       get "metrics", to: "metrics#index"
     end

@@ -10,7 +10,8 @@ class BrowserExtractor < Extractor
 
   def extract(query:, engine:, context: {})
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    url = build_url(query: query, engine: engine, simulate: context[:simulate])
+    url = build_url(query: query, engine: engine, simulate: context[:simulate],
+                    order: context[:simulate_order])
 
     response = WorkerClient.post(worker_base_url, "/extract",
                                  body: { url: url, query: query, engine: engine },
@@ -75,11 +76,12 @@ class BrowserExtractor < Extractor
     {}
   end
 
-  def build_url(query:, engine:, simulate: nil)
+  def build_url(query:, engine:, simulate: nil, order: nil)
     base = Rails.application.config.x.simulator_base_url
     url = +"#{base}/simulator/#{engine}?q=#{CGI.escape(query)}"
     url << "&client=browser"
     url << "&failure=#{CGI.escape(simulate)}" if simulate.present?
+    url << "&order=reversed" if order == "reversed"
     url
   end
 

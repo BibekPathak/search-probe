@@ -48,7 +48,7 @@ class SearchService
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     search.update!(status: "running") unless search.status == "running"
 
-    cacheable = !force_refresh && context[:simulate].blank?
+    cacheable = !force_refresh && context[:simulate].blank? && context[:simulate_order].blank?
 
     if cacheable && (cached_results = SearchCache.read(query: search.query, engine: search.engine))
       latency = elapsed_ms(started)

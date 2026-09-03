@@ -9,7 +9,7 @@ module Api
           engine: params[:engine],
           request_id: request.request_id,
           force_refresh: force_refresh?,
-          context: { simulate: params[:simulate] }
+          context: { simulate: params[:simulate], simulate_order: params[:simulate_order] }
         )
 
         render_search(outcome)

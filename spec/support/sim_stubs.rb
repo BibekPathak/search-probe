@@ -8,6 +8,18 @@ module SimStubs
            .to_return(status: status, body: html, headers: { "Content-Type" => "text/html; charset=utf-8" })
   end
 
+  # Stub that returns an order-specific SERP, keyed on the actual query string
+  # so normal vs reversed requests resolve differently (diff demo).
+  def stub_ordered_engine(engine: "google", query: "rust", order: "normal")
+    html = Simulator::SerpBuilder.html(engine: engine, query: query, order: order)
+    query_params = { "q" => query }
+    query_params["order"] = "reversed" if order == "reversed"
+
+    WebMock.stub_request(:get, %r{\Ahttp://localhost:3000/simulator/#{engine}\b})
+           .with(query: hash_including(query_params))
+           .to_return(status: 200, body: html, headers: { "Content-Type" => "text/html; charset=utf-8" })
+  end
+
   def stub_simulated_failure(engine: "google", status: 403, body: "blocked")
     WebMock.stub_request(:get, %r{\Ahttp://localhost:3000/simulator/#{engine}\b})
            .to_return(status: status, body: body, headers: { "Content-Type" => "text/html; charset=utf-8" })

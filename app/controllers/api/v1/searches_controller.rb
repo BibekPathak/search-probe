@@ -29,6 +29,26 @@ module Api
         render json: search_payload(search)
       end
 
+      def diff
+        search = Search.where(id: params[:id]).first
+        return render json: { error: { code: "not_found", type: "not_found", message: "Search not found." } },
+                      status: :not_found if search.nil?
+
+        previous = Search.previous_for(query: search.query, engine: search.engine, not_id: search.id)
+        return render json: { search_id: search.id.to_s, compared_to: nil,
+                              added: [], removed: [], position_changes: [] } unless previous
+
+        diff = SerpDiff.between(current: search, previous: previous)
+
+        render json: {
+          search_id: search.id.to_s,
+          compared_to: previous.id.to_s,
+          added: diff.added,
+          removed: diff.removed,
+          position_changes: diff.position_changes
+        }
+      end
+
       private
 
       def normalized_query
