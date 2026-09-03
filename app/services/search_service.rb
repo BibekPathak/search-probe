@@ -1,16 +1,18 @@
 # Orchestrates a single synchronous search.
 #
-# Current shape (Phase 1): one HTTP attempt, persisted, with normalized results.
-# Later phases slot the ExtractionPlanner, cache lookups and background jobs in
-# behind this same facade so the controllers stay untouched.
+# Current shape (Phase 2): one HTTP attempt, persisted + logged via the attempt
+# recorder, with normalized results. Later phases slot the ExtractionPlanner,
+# cache lookups and background jobs in behind this same facade so the
+# controllers stay untouched.
 class SearchService
   Outcome = Struct.new(:query, :engine, :results, :cached, :latency_ms,
                        :strategy, :attempts, :search, keyword_init: true)
 
   DEFAULT_ENGINE = "google"
 
-  def initialize(extractor: nil)
+  def initialize(extractor: nil, recorder: nil)
     @extractor = extractor || HttpExtractor.new
+    @recorder = recorder || ExtractionAttemptRecorder.new
   end
 
   def call(query:, engine: nil, request_id: nil)
@@ -23,7 +25,7 @@ class SearchService
     search = Search.create!(query: normalized_query, engine: normalized_engine, status: "running")
 
     extraction = @extractor.extract(query: normalized_query, engine: normalized_engine)
-    record_attempt(search, normalized_engine, extraction)
+    @recorder.call(search: search, engine: normalized_engine, extraction: extraction, request_id: request_id)
 
     unless extraction.success?
       search.update!(status: "failed", error_type: extraction.error_type)
@@ -66,19 +68,6 @@ class SearchService
     return if Search::ENGINES.include?(engine)
 
     raise Errors::UnsupportedEngine.new(engine)
-  end
-
-  def record_attempt(search, engine, extraction)
-    ExtractionAttempt.create!(
-      search: search,
-      engine: engine,
-      strategy: extraction.strategy,
-      status: extraction.success? ? "success" : "failure",
-      http_status: extraction.http_status,
-      latency_ms: extraction.latency_ms,
-      error_type: extraction.error_type,
-      error_message: extraction.error_message
-    )
   end
 
   def persist_results(search, results)

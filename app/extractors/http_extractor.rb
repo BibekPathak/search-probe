@@ -3,14 +3,15 @@
 # Cheap and fast: fetch the (simulated) engine page with a plain HTTP client,
 # parse the HTML, and normalize. Everything is expressed through the common
 # ExtractionResult interface so the planner can mix strategies freely.
-class HttpExtractor
+class HttpExtractor < Extractor
   STRATEGY = "http"
 
   # Status codes the strategy must reason about:
   #   200            -> parse + return results (or captcha/parse failure)
-  #   403            -> blocked
+  #   401/403        -> blocked
   #   429            -> rate_limited
-  #   5xx / timeout  -> transient, server-side (retryable)
+  #   408/timeout    -> timed out (retryable)
+  #   5xx            -> transient, server-side (retryable)
   def extract(query:, engine:, context: {})
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     url = build_url(query: query, engine: engine)
@@ -20,28 +21,28 @@ class HttpExtractor
 
     interpret(response, latency: latency)
   rescue Net::OpenTimeout, Net::ReadTimeout, Timeout::Error, Errno::ETIMEDOUT
-    ExtractionResult.failure(
+    failure_result(
       strategy: STRATEGY,
       error_type: "timeout",
       error_message: "Request to #{engine} timed out after #{timeout_seconds}s",
       latency_ms: elapsed_ms(started)
     )
   rescue SocketError, Errno::ECONNREFUSED, Errno::ECONNRESET, EOFError, IOError => e
-    ExtractionResult.failure(
+    failure_result(
       strategy: STRATEGY,
       error_type: "network_error",
       error_message: e.class.name,
       latency_ms: elapsed_ms(started)
     )
   rescue Errors::ExtractionFailed => e
-    ExtractionResult.failure(
+    failure_result(
       strategy: STRATEGY,
       error_type: e.error_type,
       error_message: e.error_message,
       latency_ms: elapsed_ms(started)
     )
   rescue StandardError => e
-    ExtractionResult.failure(
+    failure_result(
       strategy: STRATEGY,
       error_type: "unknown",
       error_message: "#{e.class}: #{e.message}",
@@ -59,55 +60,45 @@ class HttpExtractor
 
   def interpret(response, latency:)
     case response.status
-    when 403
-      failure("blocked", "Engine refused the request (HTTP 403)", latency, response.status)
-    when 429
-      failure("rate_limited", "Engine rate limited the request (HTTP 429)", latency, response.status)
     when 401
-      failure("blocked", "Engine requires authentication (HTTP 401)", latency, response.status)
+      failure_result(strategy: STRATEGY, error_type: "blocked",
+                     error_message: "Engine requires authentication (HTTP 401)", latency_ms: latency, http_status: 401)
+    when 403
+      failure_result(strategy: STRATEGY, error_type: "blocked",
+                     error_message: "Engine refused the request (HTTP 403)", latency_ms: latency, http_status: 403)
     when 408
-      failure("timeout", "Engine request timed out (HTTP 408)", latency, response.status)
+      failure_result(strategy: STRATEGY, error_type: "timeout",
+                     error_message: "Engine request timed out (HTTP 408)", latency_ms: latency, http_status: 408)
+    when 429
+      failure_result(strategy: STRATEGY, error_type: "rate_limited",
+                     error_message: "Engine rate limited the request (HTTP 429)", latency_ms: latency, http_status: 429)
     when 500..599
-      failure("unknown", "Engine returned an internal error (HTTP #{response.status})", latency, response.status)
+      failure_result(strategy: STRATEGY, error_type: "unknown",
+                     error_message: "Engine returned an internal error (HTTP #{response.status})",
+                     latency_ms: latency, http_status: response.status)
     else
       interpret_ok(response.body, latency: latency, status: response.status)
     end
   end
 
   def interpret_ok(body, latency:, status:)
-    return failure("captcha", "Engine presented a CAPTCHA challenge", latency, status) if SerpParser.captcha?(body)
+    return failure_result(strategy: STRATEGY, error_type: "captcha",
+                          error_message: "Engine presented a CAPTCHA challenge",
+                          latency_ms: latency, http_status: status) if SerpParser.captcha?(body)
 
-    raw = SerpParser.parse(body)
-    results = ResultNormalizer.normalize_results(raw)
+    results = ResultNormalizer.normalize_results(SerpParser.parse(body))
 
     if results.empty?
-      failure("parse_error", "No organic results found in engine response", latency, status)
+      failure_result(strategy: STRATEGY, error_type: "parse_error",
+                     error_message: "No organic results found in engine response",
+                     latency_ms: latency, http_status: status)
     else
-      ExtractionResult.success(
-        strategy: STRATEGY,
-        results: results,
-        latency_ms: latency,
-        http_status: status,
-        metadata: { result_count: results.size }
-      )
+      success_result(strategy: STRATEGY, results: results, latency_ms: latency,
+                     http_status: status, metadata: { result_count: results.size })
     end
-  end
-
-  def failure(error_type, message, latency, http_status)
-    ExtractionResult.failure(
-      strategy: STRATEGY,
-      error_type: error_type,
-      error_message: message,
-      latency_ms: latency,
-      http_status: http_status
-    )
   end
 
   def timeout_seconds
     Rails.application.config.x.request_timeout_seconds
-  end
-
-  def elapsed_ms(started)
-    ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
   end
 end
