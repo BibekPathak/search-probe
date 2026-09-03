@@ -23,6 +23,8 @@ RSpec.configure do |config|
     SearchProbe::TestCleaner.clean!
     Rails.cache.clear
     WebMock.reset!
+    # Tests never talk to a live backend; point extractors at the stubbed host.
+    Rails.application.config.x.simulator_base_url = "http://localhost:3000"
   end
 
   config.infer_spec_type_from_file_location!
